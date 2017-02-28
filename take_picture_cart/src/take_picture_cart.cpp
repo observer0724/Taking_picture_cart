@@ -108,15 +108,15 @@ int main(int argc, char **argv) {
     gripper_ang1 = 0.0;
 
 
-    x_vec2<<0.60615, 0.0384314,  0.794421;
-    z_vec2<<0.791841, -0.122883, -0.598237;
-    tip_origin2<<0.154536 ,-0.0435045  ,-0.121711;
+    x_vec2<<0.72405 , 0.031784 , 0.689014;
+    z_vec2<<0.673484,  0.183066 ,-0.716175;
+    tip_origin2<<0.1300, -0.0150,  -0.1259117;
     y_vec2 = z_vec2.cross(x_vec2);
-    gripper_ang1 = 0.0;
+    gripper_ang2 = -10.0;
 
     arrival_time = 3;
     Eigen::Matrix3d R;
-    Eigen::Affine3d des_gripper_affine1,des_gripper_affine2;
+    Eigen::Affine3d des_gripper_affine1,des_gripper_affine2,des_moving;
     vector<Eigen::Affine3d> gripper1_affines,gripper2_affines;
     R.col(0) = x_vec1;
     R.col(1) = y_vec1;
@@ -129,6 +129,7 @@ int main(int argc, char **argv) {
     R.col(2) = z_vec2;
     des_gripper_affine2.linear() = R;
     des_gripper_affine2.translation() = tip_origin2;
+    des_moving = des_gripper_affine2;
 
     Vectorq7x1 q_vec1,q_vec2;
     q_vec1.resize(7);
@@ -155,13 +156,13 @@ int main(int argc, char **argv) {
     q_vec2 = ik_solver2.get_soln();
     q_vec2(6) = gripper_ang2;
     //repackage q's into a trajectory;
-
+    ROS_INFO_STREAM("q_vec2:"<<q_vec2);
     for (int i=0;i<7;i++) {
         trajectory_point.positions[i] = q_vec1(i);
         trajectory_point.positions[i+7] = q_vec2(i);
         //should fix up jaw-opening values...do this later
     }
-
+    double height = trajectory_point.positions[9];
     trajectory_point.time_from_start = ros::Duration(arrival_time);
     des_trajectory.points.push_back(trajectory_point);
 
@@ -200,63 +201,87 @@ int main(int argc, char **argv) {
 
     int pic_num = 0;
     char temp[16];
-    string folder = "/home/observer0724/Desktop/pictures/";
+    string folder = "/home/dvrk/Desktop/pictures/";
     string name;
     //picture name and route
+    srand(time(0));
+    double rand_x;
+    double rand_y;
+    double rand_r;
+    double rand_theta;
+    for (int j=0; j<10; j++){
+    	rand_r = (double)(rand()%400)/10000.00;
+    	rand_theta = (rand()%6282)/1000.00;
+    	rand_x = rand_r*cos(rand_theta);
+    	rand_y = rand_r*sin(rand_theta);
+    	ROS_INFO_STREAM("rand_r:"<<rand_r);
+	    ROS_INFO_STREAM("rand_theta:"<<rand_theta);
+        ROS_INFO_STREAM("rand_x:"<<rand_x);
+        ROS_INFO_STREAM("rand_y:"<<rand_y);
+        des_moving = des_gripper_affine2;
+        des_moving.translation()[0] = des_gripper_affine2.translation()[0]+rand_x;
+        des_moving.translation()[1] = des_gripper_affine2.translation()[1]+rand_y;
+        ik_solver2.ik_solve(des_moving);
+        q_vec2 = ik_solver2.get_soln();
+        q_vec2(6) = gripper_ang2;
+	    for (int i=0;i<7;i++) {
+	        tgoal.trajectory.points[0].positions[i+7] = q_vec2(i);
+	    }
+        tgoal.trajectory.points[0].positions[9] = height;
 
-    for (int i=0; i<10; i++){
-        tgoal.trajectory = des_trajectory;
-        ROS_INFO_STREAM("LOOP i is: " << i);
-        ros::spinOnce();
-        while (weight_data <= 2.5){
-            g_server_goal_completed= false;
-            action_client.sendGoal(tgoal,&doneCb);
 
-            while(!g_server_goal_completed){
-                doneCb;
-                ros::Duration(2).sleep();
-                ROS_INFO("STILL MOVING");
-            }
-            ros::spinOnce();
-            ROS_INFO("Taking a picture");
-            ros::Duration(2).sleep();
-            if (freshImage){
-                sprintf(temp,"%d",pic_num);
-                string file(temp);
-                if (weight_data>0.1){
-                    name = folder+"touch/"+file+".png";
-                }
-                else{
-                    name = folder+"not_touch/"+file+".png";
-                }
-                imwrite(name,rawImage_left);
-                freshImage = false;
-                pic_num ++;
-            }
-            ROS_INFO("Picture taken");
-            des_gripper_affine2.translation()[2] -= 0.02;
-            ik_solver2.ik_solve(des_gripper_affine2); //convert desired pose into equiv joint displacements
-            q_vec2 = ik_solver2.get_soln();
-            q_vec2(6) = gripper_ang2;
-            for (int i=0;i<7;i++) {
-                tgoal.trajectory.points[0].positions[i+7] = q_vec2(i);
-            }
-            tgoal.trajectory.points[0].time_from_start = ros::Duration(arrival_time);
-            tstart.trajectory.points[0].time_from_start = ros::Duration(arrival_time+2.0);
-            tgoal.traj_id = rand();
-            ROS_INFO("%f",weight_data);
-        }
-        action_client.sendGoal(tstart,&doneCb);
-        //return to the start point
-        g_server_goal_completed= false;
-        while(!g_server_goal_completed){
-            doneCb;
-            ros::Duration(2).sleep();
-            ROS_INFO("STILL MOVING");
-            //waiting till it reaches the start point
-        }
-    }
 
+	        ROS_INFO_STREAM("CART coordinates:"<<des_moving.translation()); 
+	        ROS_INFO_STREAM("LOOP i is: " << j);
+	        ros::spinOnce();
+	        while (weight_data <= 2.5){
+	            g_server_goal_completed= false;
+	            action_client.sendGoal(tgoal,&doneCb);
+
+	            while(!g_server_goal_completed){
+	                doneCb;
+	                ros::Duration(2).sleep();
+	                ROS_INFO("STILL MOVING");
+	            }
+	            ros::spinOnce();
+	            ROS_INFO("Taking a picture");
+	            ros::Duration(2).sleep();
+	            if (freshImage){
+	                sprintf(temp,"%d",pic_num);
+	                string file(temp);
+	                if (weight_data>0.1){
+	                    name = folder+"touch/"+file+".png";
+	                }
+	                else{
+	                    name = folder+"not_touch/"+file+".png";
+	                }
+	                imwrite(name,rawImage_left);
+	                freshImage = false;
+	                pic_num ++;
+	            }
+	            ROS_INFO("Picture taken");
+	            des_moving.translation()[2] -= 0.002;
+	            ik_solver2.ik_solve(des_moving);
+	            q_vec2 = ik_solver2.get_soln();
+	            q_vec2(6) = gripper_ang2;
+	            for (int i=0;i<7;i++) {
+	                tgoal.trajectory.points[0].positions[i+7] = q_vec2(i);
+	            }
+	            tgoal.trajectory.points[0].time_from_start = ros::Duration(arrival_time);
+	            tstart.trajectory.points[0].time_from_start = ros::Duration(arrival_time+2.0);
+	            tgoal.traj_id = rand();
+	            ROS_INFO("%f",weight_data);
+	        }
+	        action_client.sendGoal(tstart,&doneCb);
+	        //return to the start point
+	        g_server_goal_completed= false;
+	        while(!g_server_goal_completed){
+	            doneCb;
+	            ros::Duration(2).sleep();
+	            ROS_INFO("STILL MOVING");
+	            //waiting till it reaches the start point
+	        }
+	    }
 
 
 
